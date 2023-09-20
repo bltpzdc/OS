@@ -681,3 +681,36 @@ procdump(void)
     printf("\n");
   }
 }
+
+void 
+dump(void){
+  struct proc *process = myproc();
+  struct trapframe *trapframe = process -> trapframe;
+  uint64* p = &(trapframe -> s2);
+  for (int i = 2; i < 12; i++){
+    printf("s%d = %d\n", i, *p);
+    p++;
+  }
+}
+
+int 
+dump2(int pid, int register_num, uint64 return_value){
+  if (register_num > 11 || register_num < 2) return -3;
+
+  struct proc *needed_proc;
+  int i;
+  for (i = 0; i < NPROC; i++){
+    if (proc[i].pid == pid) {
+      needed_proc = &proc[i];
+      break;
+    }
+  }
+  if (i == NPROC) return -2;
+  struct proc *cur_proc = myproc();
+  if (!(cur_proc -> pid == needed_proc -> pid || cur_proc -> pid == needed_proc -> parent -> pid)) return -1;
+
+  uint64 *p = &(needed_proc -> trapframe -> s2);
+  p += register_num - 2;
+  if (copyout(cur_proc -> pagetable, return_value, (void*) p, sizeof(uint64)) < 0) return -4;
+  return 0;
+}
