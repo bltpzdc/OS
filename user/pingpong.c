@@ -12,8 +12,6 @@ main(){
     pipe(p1);
     pipe(p2);
 
-    dump();
-
     int pr = fork();
     int pid = getpid();
 
