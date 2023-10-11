@@ -170,8 +170,8 @@ void bd_free(void *p) {
   for (k = size(p); k < MAXSIZE; k++) {
     int bi = blk_index(k, p);
     int buddy = (bi % 2 == 0) ? bi + 1 : bi - 1;
-    bit_inverse(bd_sizes[k].alloc, bi / 2);           // free p at size k
-    if (bit_isset(bd_sizes[k].alloc, buddy / 2)) {  // is buddy allocated?
+    bit_inverse(bd_sizes[k].alloc, bi / 2);       // free p at size k
+    if (bit_isset(bd_sizes[k].alloc, bi / 2)) {  // is buddy allocated?
       break;                                    // break out of loop
     }
     // budy is free; merge with buddy
