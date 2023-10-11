@@ -50,6 +50,11 @@ void bit_set(char *array, int index) {
   array[index / 8] = (b | m);
 }
 
+// Inverse bit at position index in array
+void bit_inverse(char* array, int index){
+  array[index / 8] ^= (1 << (index % 8));
+}
+
 // Clear bit at position index in array
 void bit_clear(char *array, int index) {
   char b = array[index / 8];
