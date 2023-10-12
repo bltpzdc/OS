@@ -249,10 +249,22 @@ int bd_initfree(void *bd_left, void *bd_right) {
   for (int k = 0; k < MAXSIZE; k++) {  // skip max size
     int left = blk_index_next(k, bd_left);
     int right = blk_index(k, bd_right);
-    free += bd_initfree_pair(k, left);
+    
+    if (bit_isset(bd_sizes[k].alloc, left / 2)){
+      if (left % 2 == 0) left++;
+      lst_push(&bd_sizes[k].free, addr(k, left));
+      free += BLK_SIZE(k);
+    }
+
     if (right <= left) continue;
-    free += bd_initfree_pair(k, right);
+
+    if (bit_isset(bd_sizes[k].alloc, right / 2)){
+      if (right % 2 == 1) right--;
+      lst_push(&bd_sizes[k].free, addr(k, right));
+      free += BLK_SIZE(k);
+    }
   }
+
   return free;
 }
 
@@ -301,7 +313,7 @@ void bd_init(void *base, void *end) {
   // initialize free list and allocate the alloc array for each size k
   for (int k = 0; k < nsizes; k++) {
     lst_init(&bd_sizes[k].free);
-    sz = sizeof(char) * ROUNDUP(NBLK(k), 8) / 8;
+    sz = sizeof(char) * ROUNDUP(NBLK(k) / 2, 8) / 8;
     bd_sizes[k].alloc = p;
     memset(bd_sizes[k].alloc, 0, sz);
     p += sz;
