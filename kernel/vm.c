@@ -42,7 +42,7 @@ kvmmake(void)
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
   kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
-  
+
   return kpgtbl;
 }
 
@@ -144,7 +144,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 
   if(size == 0)
     panic("mappages: size");
-  
+
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
@@ -330,7 +330,7 @@ void
 uvmclear(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
-  
+
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
@@ -428,4 +428,25 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void vmprint_handler(pagetable_t pagetable, uint8 level){
+    for (uint16 i = 0; i < 512; i++) {
+        pte_t pte = pagetable[i];
+        if (pte & PTE_V) {
+            for (int i = 0; i < level; i++) {
+                printf(".. ");
+            }
+            printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+            if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+                uint64 new_pagetable = PTE2PA(pte);
+                vmprint_handler((pagetable_t)new_pagetable, level + 1);
+            }
+        }
+    }
+}
+
+void vmprint(pagetable_t pagetable){
+    printf("page table %p\n", pagetable);
+    vmprint_handler(pagetable, 1);
 }
