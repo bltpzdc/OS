@@ -111,14 +111,14 @@ allocproc(void)
   p->pid = allocpid();
   p->state = USED;
   
-  if ((p->kstack = (uint64)kalloc()) == 0) {
+  if (!(p->kstack = (uint64)kalloc())) {
     freeproc(p);
     release(&list_lock);
     return 0;
   }
 
   // Allocate a trapframe page.
-  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+  if(!(p->trapframe = (struct trapframe *)kalloc())){
     freeproc(p);
     release(&list_lock);
     return 0;
@@ -126,7 +126,7 @@ allocproc(void)
 
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
-  if(p->pagetable == 0){
+  if(!p->pagetable){
     freeproc(p);
     release(&list_lock);
     return 0;
