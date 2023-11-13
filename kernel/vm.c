@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -313,9 +315,18 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+
+    if (flags & PTE_W) {
+        flags |= PTE_COW;
+        flags &= ~PTE_W;
+        *pte |= PTE_COW;
+        *pte &= ~PTE_W;
+    }
+
     if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    inc_ref((void *)pa);
   }
   return 0;
 
@@ -449,4 +460,59 @@ void vmprint_handler(pagetable_t pagetable, uint8 level){
 void vmprint(pagetable_t pagetable){
     printf("page table %p\n", pagetable);
     vmprint_handler(pagetable, 1);
+}
+
+int valid_va(struct proc *p, uint64 va){
+    if (va >= MAXVA) {
+        return 0;
+    }
+    if (va >= p->sz){
+        return 0;
+    }
+    return 1;
+}
+
+int is_cow(pagetable_t pagetable, uint64 va){
+    if (!valid_va(myproc(), va)){
+        return 0;
+    }
+    pte_t *pte = walk(pagetable, va, 0);
+    if (!pte) {
+        return 0;
+    }
+    uint flags = PTE_FLAGS(*pte);
+    if (!(flags & PTE_V)) {
+        return 0;
+    }
+    if (!(flags & PTE_U)) {
+        return 0;
+    }
+    if (!(flags & PTE_COW)) {
+        return 0;
+    }
+    return 1;
+}
+
+int
+uvmcopy_cow(pagetable_t pagetable, uint64 va)
+{
+    pte_t *pte = walk(pagetable, va, 0);
+    uint64 pa = PTE2PA(*pte);
+    uint flags = PTE_FLAGS(*pte);
+    flags |= PTE_W;
+    flags &= ~PTE_COW;
+    char *mem = kalloc();
+    if (!mem) {
+        printf("cow: no memory allocated");
+        return -1;
+    }
+    memmove(mem, (char *)pa, PGSIZE);
+    uvmunmap(pagetable, va, 1, 0);
+    kfree((void *)pa);
+    if (mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0){
+        printf("cow: error during mapping pages");
+        kfree(mem);
+        return -2;
+    }
+    return 0;
 }
