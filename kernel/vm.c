@@ -358,6 +358,12 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+      if (is_cow(pagetable, va0)){
+          if (uvmcopy_cow(pagetable, va0) < 0){
+              printf("cow: copy failed in copyout\n");
+              return -1;
+          }
+      }
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
