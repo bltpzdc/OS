@@ -67,10 +67,28 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else if (r_scause() == 15) {
-      uint64 va = PGROUNDDOWN(r_stval());
-      if (!is_cow(p->pagetable, va) || uvmcopy_cow(p->pagetable, va) < 0){
+  } else if (r_scause() == 15 || r_scause() == 13) {
+      uint64 va = r_stval();
+      uint64 page = PGROUNDDOWN(va);
+
+      if (p->sz <= va || va < PGROUNDDOWN(p->trapframe->sp) / 10) {
+          printf("usertrap: invalid va\n");
           goto kill_proc;
+      }
+
+      pte_t *pte = walk(p->pagetable, page, 0);
+      if (pte == 0 || !(*pte & PTE_V)) {
+          if (lazy_alloc(p->pagetable, page) != 0) {
+              printf("usertrap: lazy alloc failed\n");
+              goto kill_proc;
+          }
+      } else {
+          if ((*pte & PTE_COW)) {
+              if (uvmcopy_cow(p->pagetable, page)) {
+                  printf("usertrap: cow copy failed\n");
+                  goto kill_proc;
+              }
+          }
       }
   } else {
       kill_proc:

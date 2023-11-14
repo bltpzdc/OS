@@ -22,6 +22,14 @@ void kinit() {
   bd_init(p, (void *)PHYSTOP);
 }
 
+void acquire_ref_lock() {
+    acquire(&ref_lock);
+}
+
+void release_ref_lock() {
+    release(&ref_lock);
+}
+
 void dec_ref(void *pa){
     uint index = REF_INDEX((uint64)pa);
     if (refs[index] <= 0) {
@@ -40,12 +48,12 @@ void inc_ref(void *pa){
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
 void kfree(void *pa) {
-    acquire(&ref_lock);
+    acquire_ref_lock();
     dec_ref(pa);
     if (refs[REF_INDEX((uint64)pa)] <= 0) {
         bd_free(pa);
     }
-    release(&ref_lock);
+    release_ref_lock();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -53,8 +61,8 @@ void kfree(void *pa) {
 // Returns 0 if the memory cannot be allocated.
 void *kalloc(void) {
     void *pa = bd_malloc(PGSIZE);
-    acquire(&ref_lock);
+    acquire_ref_lock();
     inc_ref(pa);
-    release(&ref_lock);
+    release_ref_lock();
     return pa;
 }

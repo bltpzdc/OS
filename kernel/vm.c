@@ -45,6 +45,9 @@ kvmmake(void)
   // the highest virtual address in the kernel.
   kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 
+  // allocate and map a kernel stack for each process.
+  proc_mapstacks(kpgtbl);
+
   return kpgtbl;
 }
 
@@ -114,10 +117,23 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0)
-    return 0;
-  if((*pte & PTE_V) == 0)
-    return 0;
+  if(pte == 0 || (*pte & PTE_V) == 0) {
+      if (!valid_va(myproc(), va)) {
+          return 0;
+      }
+      void* mem = kalloc();
+      if (mem == 0) {
+          printf("walkaddr: lazy alloc out of memory\n");
+          return 0;
+      }
+      memset(mem, 0, PGSIZE);
+      if (mappages(pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_U) != 0) {
+          kfree(mem);
+          printf("walkaddr: lazy alloc failed to map pages");
+          return 0;
+      }
+      pte = walk(pagetable, va, 0);
+  }
   if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
@@ -177,9 +193,9 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+        continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+        continue;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -310,9 +326,9 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
 
@@ -326,7 +342,9 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    acquire_ref_lock();
     inc_ref((void *)pa);
+    release_ref_lock();
   }
   return 0;
 
@@ -358,19 +376,37 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-      if (is_cow(pagetable, va0)){
-          if (uvmcopy_cow(pagetable, va0) < 0){
-              printf("cow: copy failed in copyout\n");
-              return -1;
-          }
-      }
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0) {
+        if (!valid_va(myproc(), va0)) {
+            printf("cow: copy failed in copyout\n");
+            return -1;
+        }
+    }
+    struct proc *p = myproc();
+    pte_t *pte = walk(pagetable, va0, 0);
+    if (*pte == 0){
+        p->killed = 1;
+    }
+    if ((va0 < p->sz) && (*pte & PTE_V) && (*pte & PTE_COW) && !(PTE_W & *pte)) {
+        void* mem = kalloc();
+        if (mem == 0) {
+            printf("copyout: failed to alloc cow page\n");
+        } else {
+            memmove(mem, (char*)pa0, PGSIZE);
+            uint flags = PTE_FLAGS(*pte);
+            uvmunmap(pagetable, va0, 1, 1);
+            *pte = (PA2PTE(mem) | flags | PTE_W);
+            *pte &= ~PTE_COW;
+            pa0 = (uint64)mem;
+        }
+    }
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
-    memmove((void *)(pa0 + (dstva - va0)), src, n);
+    if (pa0 != 0)
+        memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
     src += n;
@@ -390,12 +426,13 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+    if (pa0 == 0 && !valid_va(myproc(), srcva))
       return -1;
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+    if (pa0 != 0)
+        memmove(dst, (void *)(pa0 + (srcva - va0)), n);
 
     len -= n;
     dst += n;
@@ -469,19 +506,27 @@ void vmprint(pagetable_t pagetable){
 }
 
 int valid_va(struct proc *p, uint64 va){
+    acquire(&p->lock);
     if (va >= MAXVA) {
+        release(&p->lock);
         return 0;
     }
     if (va >= p->sz){
+        release(&p->lock);
         return 0;
     }
+    if (va < PGROUNDDOWN(p->trapframe->sp)) {
+        release(&p->lock);
+        return 0;
+    }
+    release(&p->lock);
     return 1;
 }
 
 int is_cow(pagetable_t pagetable, uint64 va){
     if (!valid_va(myproc(), va)){
         return 0;
-    }
+    }//TODO ?
     pte_t *pte = walk(pagetable, va, 0);
     if (!pte) {
         return 0;
@@ -513,12 +558,30 @@ uvmcopy_cow(pagetable_t pagetable, uint64 va)
         return -1;
     }
     memmove(mem, (char *)pa, PGSIZE);
-    uvmunmap(pagetable, va, 1, 0);
-    kfree((void *)pa);
+    uvmunmap(pagetable, va, 1, 1);
     if (mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0){
         printf("cow: error during mapping pages");
         kfree(mem);
         return -2;
     }
+    return 0;
+}
+
+int lazy_alloc(pagetable_t pagetable, uint64 va) {
+    void* mem = kalloc();
+
+    if (mem == 0) {
+        printf("lazy_alloc: failed to allocated memory\n");
+        return -1;
+    }
+    memset(mem, 0, PGSIZE);
+    int perm = PTE_W | PTE_R | PTE_U;
+
+    if (mappages(pagetable, va, PGSIZE, (uint64)mem, perm)) {
+        kfree(mem);
+        printf("lazy_alloc: failed to map pages\n");
+        return -2;
+    }
+
     return 0;
 }

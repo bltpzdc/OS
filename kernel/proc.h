@@ -107,4 +107,6 @@ struct proc {
 
   struct proc *prev;
   struct proc *next;
+
+    uint64 ustack;
 };

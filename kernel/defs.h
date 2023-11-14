@@ -83,6 +83,8 @@ void            kfree(void *);
 void            kinit(void);
 void            inc_ref(void *pa);
 void            dec_ref(void *pa);
+void            acquire_ref_lock();
+void            release_ref_lock();
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -107,7 +109,6 @@ int             dump2(int pid, int reg_num, uint64 return_value);
 int             cpuid(void);
 void            exit(int);
 int             fork(void);
-int             growproc(int);
 void            proc_mapstacks(pagetable_t);
 pagetable_t     proc_pagetable(struct proc *);
 void            proc_freepagetable(pagetable_t, uint64);
@@ -200,6 +201,8 @@ void            vmprint(pagetable_t pagetable);
 int             uvmcopy_cow(pagetable_t pagetable, uint64 va);
 int             is_cow(pagetable_t pagetable, uint64 va);
 int             uvmcopy_cow(pagetable_t pagetable, uint64 va);
+int             valid_va(struct proc *p, uint64 va);
+int             lazy_alloc(pagetable_t, uint64);
 
 // plic.c
 void            plicinit(void);
